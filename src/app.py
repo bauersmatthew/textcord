@@ -12,6 +12,8 @@ class Flag:
         self.raised = initial
     async def wave(self):
         self.raised = True
+    async def lower(self):
+        self.raised = False
     def __bool__(self):
         return self.raised
 
@@ -95,7 +97,7 @@ async def run():
         log.msg('Entering deadwait loop...')
         while not death.die_all:
             if try_login:
-                try_login = False
+                await try_login.lower()
 
                 error = False
                 err_text = ''
@@ -108,18 +110,33 @@ async def run():
                 except discord.HTTPException as err:
                     error = True
                     err_text = 'Could not connect to server.'
+                except:
+                    error = True
+                    err_text = 'Something went wrong!'
 
                 if error:
-                    log.msg('error!')
                     await disp.glblsec.sub(
                         disp.TextBox, 0, 83, 100, 17,
                         text=err_text,
                         color=disp.make_color(fg=disp.RED, attr=disp.BOLD),
                         align=disp.TextBox.ALIGN_CENTER, voff=50).draw()
+                else:
+                    break
                     
             await asyncio.sleep(0)
 
-        client.close()
+        # we logged in successfully; clear this screen
+        # and hand main control over to discord.py
+        log.msg('Logged in.')
+        disp.glblsec.disown_all()
+        disp.stdscr.clear()
+        await disp.glblsec.draw()
+        try:
+            await client.connect()
+        except:
+            raise
+        finally:
+            client.close()
 
     except Exception as e:
         log.msg('App failed!')
