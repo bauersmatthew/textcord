@@ -93,7 +93,7 @@ async def run():
         await disp.set_active(sec['email'])
         await disp.glblsec.draw()
 
-        client = discord.Client()
+        client = TextcordClient()
         
         log.msg('Entering deadwait loop...')
         while True:
@@ -144,11 +144,16 @@ async def run():
         
         # ... and hand main control over to discord.py
         try:
-            await client.connect()
+            await asyncio.wait([
+                loading_screen(),
+                client.connect()])
         except:
             raise
         finally:
             await client.close()
+
+        # finish
+        death.die_all = True
 
     except Exception as e:
         log.msg('App failed!')
@@ -157,3 +162,48 @@ async def run():
         log.msg(traceback.format_exc())
         raise
 
+flg_ready = Flag()
+
+async def loading_screen():
+    sec_text = disp.glblsec.sub(
+        disp.TextBox, 0, 0, 100, 50,
+        text='Loading...',
+        color=disp.make_color(fg=disp.RED, attr=disp.BOLD),
+        align=disp.TextBox.ALIGN_CENTER, voff=80)
+
+    ticker_chars = ['-', '\\', '|', '/', '-', '\\', '|', '/']
+    ticker_curr = 0
+    sec_ticker = disp.glblsec.sub(
+        disp.TextBox, 0, 50, 100, 50,
+        text=ticker_chars[ticker_curr],
+        color=disp.make_color(fg=disp.GREEN, attr=disp.BOLD),
+        align=disp.TextBox.ALIGN_CENTER)
+
+    await disp.glblsec.draw()
+
+    while not flg_ready:
+        await asyncio.sleep(.25)
+        ticker_curr += 1
+        if ticker_curr == len(ticker_chars):
+            ticker_curr = 0
+        sec_ticker.text = ticker_chars[ticker_curr]
+        await sec_ticker.draw()
+
+    del sec_text
+    del sec_ticker
+
+class TextcordClient(discord.Client):
+    def __init__(self, *args, **kwargs):
+        discord.Client.__init__(self, *args, **kwargs)
+        self.sec = None # section dictionary/registry
+
+    async def on_ready(self):
+        # set up GUI, _IF_ not done already
+        # (TODO)
+        log.msg('on_ready actually called...')
+        for server in self.servers:
+            log.msg('S: {}'.format(server.name))
+        log.msg('[on_ready] exiting')
+        await flg_ready.wave()
+        await self.logout()
+        await self.close()

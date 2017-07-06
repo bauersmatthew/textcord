@@ -454,7 +454,10 @@ class TextBox(Section):
         blank_line = ' '*self.w_real
         lnnum = 0
         for y in range(self.y_real, self.y_real+self.h_real):
-            putstr(blank_line, self.x_real, self.y_real+lnnum)
+            try:
+                putstr(blank_line, self.x_real, self.y_real+lnnum)
+            except:
+                pass
             lnnum += 1
 
     async def draw_self(self):
