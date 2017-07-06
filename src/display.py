@@ -187,12 +187,6 @@ class Section:
 
         self.recalc_coords()
 
-    # unbind from parent, disown children
-    def __del__(self):
-        self.disown_all()
-        if self.parent:
-            self.parent.disown(self.uid)
-
     # calculate actual coords from % vals
     # assume that the parent has already recalculated!
     def recalc_coords(self):
@@ -231,15 +225,20 @@ class Section:
 
     # remove a child
     def disown(self, uid):
+        # unlink both ways
+        if self.children[uid] is not None:
+            self.children[uid].parent = None
         self.children[uid] = None
 
     # remove all children
     def disown_all(self):
-        log.msg('disowning all...')
-        for child in self.children:
-            if child is not None:
-                del child
-        self.children = []
+        for uid in range(len(self.children)):
+            self.disown(uid)
+
+    # remove self from parent
+    def release(self):
+        if self.parent is not None:
+            self.parent.disown(self.uid)
 
     # add a child
     # values in %

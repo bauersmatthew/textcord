@@ -27,83 +27,89 @@ async def run():
         try_login = Flag()
 
         log.msg('Setting up login screen sections...')
-
-        sec_title = disp.glblsec.sub(
+        sec = {} #SECtion registry
+        
+        sec['title'] = disp.glblsec.sub(
             disp.TextBox, 0, 0, 100, 33,
             text='Welcome to TextCord!',
             color=disp.make_color(fg=disp.BLUE,
                                   attr=disp.UNDERLINE|disp.BOLD),
             align=disp.TextBox.ALIGN_CENTER, voff=50)
 
-        sec_login = disp.glblsec.sub(
+        sec['login'] = disp.glblsec.sub(
             disp.BorderedBox, 15, 33, 70, 50)
 
         # key 27 is escape
 
-        sec_email = sec_login.sub(
+        sec['email'] = sec['login'].sub(
             disp.Activator, 0, 0, 100, 33)
-        sec_email_prompt = sec_email.sub(
+        sec['email_prompt'] = sec['email'].sub(
             disp.TextBox, 0, 0, 25, 100,
             text='Email: ',
             color_active=disp.make_color(attr=disp.BOLD|disp.REVERSE),
             align=disp.TextBox.ALIGN_RIGHT)
-        sec_email_input = sec_email.sub(
+        sec['email_input'] = sec['email'].sub(
             disp.InputBox, 25, 0, 75, 100, do_send_input=True)
-        sec_email.add_key_handler(
-            ord('\n'), lambda: disp.set_active(sec_passwd))
-        sec_email.add_key_handler(
-            ord('\t'), lambda: disp.set_active(sec_passwd))
+        sec['email'].add_key_handler(
+            ord('\n'), lambda: disp.set_active(sec['passwd']))
+        sec['email'].add_key_handler(
+            ord('\t'), lambda: disp.set_active(sec['passwd']))
             
-        sec_passwd = sec_login.sub(
+        sec['passwd'] = sec['login'].sub(
             disp.Activator, 0, 33, 100, 33)
-        sec_passwd_prompt = sec_passwd.sub(
+        sec['passwd_prompt'] = sec['passwd'].sub(
             disp.TextBox, 0, 0, 25, 100,
             text='Password: ',
             color_active=disp.make_color(attr=disp.BOLD),
             align=disp.TextBox.ALIGN_RIGHT)
-        sec_passwd_input = sec_passwd.sub(
+        sec['passwd_input'] = sec['passwd'].sub(
             disp.MaskedInput, 25, 0, 75, 100, do_send_input=True)
-        sec_passwd.add_key_handler(
+        sec['passwd'].add_key_handler(
             ord('\n'), lambda: try_login.wave())
-        sec_passwd.add_key_handler(
-            ord('\t'), lambda: disp.set_active(btn_quit))
+        sec['passwd'].add_key_handler(
+            ord('\t'), lambda: disp.set_active(sec['btn_quit']))
 
-        btn_quit = sec_login.sub(
+        sec['btn_quit'] = sec['login'].sub(
             disp.TextBox, 0, 66, 50, 33,
             text='Quit',
             color_active=disp.make_color(attr=disp.REVERSE),
             align=disp.TextBox.ALIGN_CENTER, voff=50)
-        btn_quit.add_key_handler(
+        sec['btn_quit'].add_key_handler(
             ord('\n'), death.set_die_all)
-        btn_quit.add_key_handler(
-            ord('\t'), lambda: disp.set_active(btn_login))
+        sec['btn_quit'].add_key_handler(
+            ord('\t'), lambda: disp.set_active(sec['btn_login']))
 
-        btn_login = sec_login.sub(
+        sec['btn_login'] = sec['login'].sub(
             disp.TextBox, 50, 66, 50, 33,
             text='Login',
             color_active=disp.make_color(attr=disp.REVERSE),
             align=disp.TextBox.ALIGN_CENTER, voff=50)
-        btn_login.add_key_handler(
-            ord('\t'), lambda: disp.set_active(sec_email))
-        btn_login.add_key_handler(
+        sec['btn_login'].add_key_handler(
+            ord('\t'), lambda: disp.set_active(sec['email']))
+        sec['btn_login'].add_key_handler(
             ord('\n'), lambda: try_login.wave())
 
         log.msg('Finalizing screen sections...')
-        await disp.set_active(sec_email)
+        await disp.set_active(sec['email'])
         await disp.glblsec.draw()
 
         client = discord.Client()
         
         log.msg('Entering deadwait loop...')
-        while not death.die_all:
+        while True:
+            if death.die_all:
+                # abort
+                await client.close()
+                return
+
             if try_login:
                 await try_login.lower()
 
                 error = False
                 err_text = ''
                 try:
-                    await client.login(sec_email_input.text,
-                                        sec_passwd_input.text)
+                    await client.login(sec['email_input'].text,
+                                        sec['passwd_input'].text)
                 except discord.LoginFailure as err:
                     error = True
                     err_text = 'Incorrect login credentials!'
@@ -114,6 +120,10 @@ async def run():
                     error = True
                     err_text = 'Something went wrong!'
 
+                if not error and not client.is_logged_in:
+                    error = True
+                    err_text = 'Failed to log in.'
+                    
                 if error:
                     await disp.glblsec.sub(
                         disp.TextBox, 0, 83, 100, 17,
@@ -124,19 +134,21 @@ async def run():
                     break
                     
             await asyncio.sleep(0)
-
         # we logged in successfully; clear this screen
-        # and hand main control over to discord.py
         log.msg('Logged in.')
-        disp.glblsec.disown_all()
-        disp.stdscr.clear()
-        await disp.glblsec.draw()
+        disp.glblsec.disown_all() # disconnect all from root
+        await disp.set_active(disp.glblsec) # deactivate login screen
+        # delete all sections
+        sec.clear()
+        disp.stdscr.clear() # clear the screen
+        
+        # ... and hand main control over to discord.py
         try:
             await client.connect()
         except:
             raise
         finally:
-            client.close()
+            await client.close()
 
     except Exception as e:
         log.msg('App failed!')
