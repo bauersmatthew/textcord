@@ -2,6 +2,8 @@ import asyncio
 import curses
 import sys
 import traceback
+import os
+import locale
 
 import death
 import log
@@ -10,6 +12,8 @@ from collections import namedtuple
 
 def init():
     global stdscr
+    locale.setlocale(locale.LC_ALL, '')
+    os.environ.setdefault('ESCDELAY', '25')
     stdscr = curses.initscr()
     curses.noecho()
     curses.cbreak()
@@ -149,8 +153,11 @@ def make_color(fg=None, bg=None, attr=None):
 
 def putstr(s, x, y, col=color_default):
     global stdscr, color_table
-    stdscr.addstr(y, x, s,
+    try:
+        stdscr.addstr(y, x, s.encode('utf-8'),
                   curses.color_pair(col) | color_table[col].attr)
+    except:
+        pass
 
 active_section = None
 async def check_input():
@@ -159,6 +166,8 @@ async def check_input():
     if ch == curses.ERR:
         return
     #else
+    if ch == 27: #alt/escape
+        ch = -stdscr.getch()
     if active_section is not None:
         await active_section.handle_input(ch)
 
@@ -347,7 +356,8 @@ class BorderedBox(Activator):
                  tlc_ch=None, trc_ch=None,
                  blc_ch=None, brc_ch=None,
                  left_wid=1, right_wid=1,
-                 top_wid=1, bot_wid=1):
+                 top_wid=1, bot_wid=1,
+                 color=None, color_active=None):
         self.left_ch = (left_ch if left_ch is not None else vert_ch)
         self.right_ch = (right_ch if right_ch is not None else vert_ch)
         self.top_ch = (top_ch if top_ch is not None else horiz_ch)
@@ -362,6 +372,10 @@ class BorderedBox(Activator):
         self.bot_wid = bot_wid
         Activator.__init__(self,
             x, y, w, h, uid, parent)
+        global color_default
+        self.color = color if color is not None else color_default
+        self.color_active = color_active if color_active is not None else \
+                            color_default
 
     def recalc_coords_self(self):
         Section.recalc_coords_self(self)
@@ -381,7 +395,8 @@ class BorderedBox(Activator):
     async def draw_border(self, sx, lenx, sy, leny, ch):
         border_str = ch * lenx
         for y in range(sy, sy+leny):
-            putstr(border_str, sx, y)
+            putstr(border_str, sx, y,
+                   self.color if not self.active else self.color_active)
 
     async def draw_self(self):
         # top
@@ -445,10 +460,14 @@ class TextBox(Section):
         self.voff = voff #vertical offset (%)
         
     def text_lines(self):
-        cur_off = self.scroll_offset * self.w_real
-        while cur_off < len(self.text):
-            yield self.text[cur_off:cur_off+self.w_real]
-            cur_off += self.w_real
+        for line in self.text.split('\n'):
+            if len(line) <= self.w_real:
+                yield line
+            else:
+                cur_off = 0
+                while cur_off < len(line):
+                    yield line[cur_off:cur_off+self.w_real]
+                    cur_off += self.w_real
 
     async def clear(self):
         blank_line = ' '*self.w_real
@@ -460,6 +479,21 @@ class TextBox(Section):
                 pass
             lnnum += 1
 
+    def draw_one_line(self, line, lnnum, use_color):
+        if len(line) < self.w_real:
+            # wrapping only matters for not-full lines
+            adj_x = None
+            if self.align == self.ALIGN_LEFT:
+                adj_x = self.x_real
+            elif self.align == self.ALIGN_CENTER:
+                adj_x = self.x_real+((self.w_real-len(line))//2)
+            else: # RIGHT
+                adj_x = self.x_real+self.w_real-len(line)
+                
+            putstr(line, adj_x, self.y_real+lnnum, use_color)
+        else:
+            putstr(line, self.x_real, self.y_real+lnnum, use_color)
+
     async def draw_self(self):
         # don't do clever word-safe wrapping or anything
         # maybe we'll do that later
@@ -469,19 +503,7 @@ class TextBox(Section):
         use_color = self.color_active if self.active else self.color
         lnnum = 0 + int(float(self.voff)*float(self.h_real)/100)
         for line in self.text_lines():
-            if len(line) < self.w_real:
-                # wrapping only matters for not-full lines
-                adj_x = None
-                if self.align == self.ALIGN_LEFT:
-                    adj_x = self.x_real
-                elif self.align == self.ALIGN_CENTER:
-                    adj_x = self.x_real+((self.w_real-len(line))//2)
-                else: # RIGHT
-                    adj_x = self.x_real+self.w_real-len(line)
-
-                putstr(line, adj_x, self.y_real+lnnum, use_color)
-            else:
-                putstr(line, self.x_real, self.y_real+lnnum, use_color)
+            self.draw_one_line(line, lnnum, use_color)
             lnnum += 1
 
     async def handle_input(self, ch):
@@ -511,6 +533,17 @@ class TextBox(Section):
         await Section.on_deactivate(self)
         await self.draw()
 
+class ListBox(TextBox):
+    """Like a TextBox but with entries on separate lines."""
+    def __init__(self, x, y, w, h, uid, parent,
+                 lines=[], **kwargs):
+        TextBox.__init__(self, x, y, w, h, uid, parent,
+                         **kwargs)
+        self.lines = lines
+
+    def text_lines(self):
+        yield from self.lines
+
 class InputBox(TextBox):
     def __init__(self, x, y, w, h, uid, parent, **kwargs):
         TextBox.__init__(self, x, y, w, h, uid, parent,
@@ -522,7 +555,7 @@ class InputBox(TextBox):
         ret = True
         # overrides
         if (await Section.handle_input(self, ch)):
-            pass
+            return
         # normal characters
         elif ch <= 255:
             self.text = (self.text[:self.cursor] +
@@ -536,7 +569,7 @@ class InputBox(TextBox):
                 self.cursor = 0
         elif ch == curses.KEY_RIGHT:
             self.cursor += 1
-            if self.cursor >= len(self.text):
+            if self.cursor > len(self.text):
                 self.cursor = len(self.text)-1
         elif ch == curses.KEY_UP:
             self.cursor -= self.w_real
@@ -598,3 +631,10 @@ class MaskedInput(InputBox):
     def text_lines(self):
         for line in InputBox.text_lines(self):
             yield self.mask*len(line)
+
+class BottomstuckTextBox(TextBox):
+    def __init__(self, x, y, w, h, uid, parent, **kwargs):
+        TextBox.__init__(self, x, y, w, h, uid, parent, **kwargs)
+    def text_lines(self):
+        lines = list(TextBox.text_lines(self))
+        yield from lines[-self.h_real:]
